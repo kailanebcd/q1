@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Dynamic FIRE Risk & Speed Simulator</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+body { font-family: Arial, sans-serif; margin: 20px; }
+#charts { display: flex; flex-wrap: wrap; gap: 20px; }
+canvas { background: #f9f9f9; padding: 10px; border-radius: 8px; }
+</style>
+</head>
+<body>
+
+<h1>🚀 Dynamic FIRE Risk & Speed Simulator</h1>
+<form id="simForm">
+  Years: <input type="number" id="years" value="40"><br>
+  Trials: <input type="number" id="trials" value="200"><br>
+  Start Portfolio ($): <input type="number" id="startPortfolio" value="50000"><br>
+  Start Salary ($/yr): <input type="number" id="startSalary" value="60000"><br>
+  Target Portfolio ($): <input type="number" id="targetPortfolio" value="1000000"><br>
+  Annual Return (mu): <input type="number" step="0.01" id="mu" value="0.06"><br>
+  Annual Volatility (sigma): <input type="number" step="0.01" id="sigma" value="0.16"><br>
+  Save Rate: <input type="number" step="0.01" id="saveRate" value="0.2"><br>
+  Spending Rate in Retirement: <input type="number" step="0.01" id="spendRate" value="0.04"><br>
+  <button type="submit">Run Simulation</button>
+</form>
+
+<div id="charts">
+  <canvas id="fireDist" width="400" height="300"></canvas>
+  <canvas id="finalNW" width="400" height="300"></canvas>
+</div>
+
+<script>
+function simulateTrial(params) {
+  const stepsPerYear = 12;
+  const dt = 1 / stepsPerYear;
+  let networth = params.startPortfolio;
+  let salary = params.startSalary;
+  let timeToFire = null;
+  let retired = false;
+  
+  for (let t = 0; t < params.years * stepsPerYear; t++) {
+    // market growth
+    let z = (Math.random() * 2 - 1) * Math.sqrt(dt) * params.sigma;
+    let growth = Math.exp((params.mu - 0.5 * params.sigma**2) * dt + z);
+    networth *= growth;
+    
+    // if not retired, add savings from salary
+    if (!retired) {
+      networth += (salary * params.saveRate) * dt;
+      // simple random raise
+      if (Math.random() < 0.25 * dt) salary *= (1 + 0.03);
+      // layoff
+      if (Math.random() < 0.05 * dt) salary = 0;
+      if (salary === 0 && Math.random() < 0.1) salary = params.startSalary; // recover
+    } else {
+      // withdraw
+      networth -= networth * params.spendRate * dt;
+    }
+    
+    // check FIRE
+    if (!retired && networth >= params.targetPortfolio) {
+      retired = true;
+      timeToFire = t * dt;
+    }
+  }
+  
+  return { timeToFire, finalNW: networth };
+}
+
+function runSim(params) {
+  let fireTimes = [];
+  let finals = [];
+  
+  for (let i = 0; i < params.trials; i++) {
+    const res = simulateTrial(params);
+    if (res.timeToFire !== null) fireTimes.push(res.timeToFire);
+    finals.push(res.finalNW);
+  }
+  
+  return { fireTimes, finals };
+}
+
+document.getElementById("simForm").addEventListener("submit", function(e) {
+  e.preventDefault();
+  const params = {
+    years: +document.getElementById("years").value,
+    trials: +document.getElementById("trials").value,
+    startPortfolio: +document.getElementById("startPortfolio").value,
+    startSalary: +document.getElementById("startSalary").value,
+    targetPortfolio: +document.getElementById("targetPortfolio").value,
+    mu: +document.getElementById("mu").value,
+    sigma: +document.getElementById("sigma").value,
+    saveRate: +document.getElementById("saveRate").value,
+    spendRate: +document.getElementById("spendRate").value
+  };
+  
+  const { fireTimes, finals } = runSim(params);
+  
+  renderHistogram("fireDist", fireTimes, "Years to FIRE", "#4caf50");
+  renderHistogram("finalNW", finals, "Final Net Worth ($)", "#2196f3");
+});
+
+function renderHistogram(canvasId, data, label, color) {
+  const bins = 20;
+  const minVal = Math.min(...data);
+  const maxVal = Math.max(...data);
+  const binWidth = (maxVal - minVal) / bins;
+  let counts = new Array(bins).fill(0);
+  
+  data.forEach(v => {
+    let idx = Math.min(bins - 1, Math.floor((v - minVal) / binWidth));
+    counts[idx]++;
+  });
+  
+  const ctx = document.getElementById(canvasId).getContext("2d");
+  new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: counts.map((_, i) => (minVal + i * binWidth).toFixed(1)),
+      datasets: [{
+        label,
+        data: counts,
+        backgroundColor: color
+      }]
+    },
+    options: { animation: { duration: 1000 } }
+  });
+}
+</script>
+</body>
+</html>
