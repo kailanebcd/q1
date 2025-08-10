@@ -1,0 +1,899 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Dynamic FIRE — Enhanced Realism (US simple tax)</title>
+
+<!-- Bootstrap -->
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+<!-- confetti -->
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+<style>
+:root{ --bg:#071025; --card:#0f1726; --muted:#9aa4b2; --accent:#22c55e; --accent2:#3b82f6; }
+html,body{ height:100%; margin:0; background:linear-gradient(180deg,var(--bg),#02101a); color:#e6eef6; font-family:Inter,system-ui,Segoe UI,Roboto,Arial; }
+.container-app{ max-width:1200px; margin:20px auto; padding:16px; }
+.card{ background: linear-gradient(180deg, rgba(255,255,255,0.02), var(--card)); border:none; color:inherit; border-radius:10px; }
+.form-label{ color:var(--muted); font-weight:600; }
+.small-muted{ color:var(--muted); font-size:.9rem; }
+canvas{ background:transparent; border-radius:8px; }
+.stat-card{ text-align:center; padding:12px; border-radius:8px; }
+.stat-value{ font-size:1.25rem; font-weight:700; color:#fff; }
+.racetrack{ background: rgba(255,255,255,0.02); padding:10px; border-radius:8px; max-height:320px; overflow:auto; }
+.racer-row{ display:flex; align-items:center; gap:8px; margin-bottom:7px; }
+.racer-name{ width:90px; color:var(--muted); font-size:.9rem; }
+.track{ flex:1; height:14px; background:rgba(255,255,255,0.03); border-radius:9px; position:relative; overflow:hidden; }
+.racer-bar{ position:absolute; left:0; top:0; bottom:0; width:0%; background: linear-gradient(90deg,var(--accent),var(--accent2)); border-radius:9px; transition: width .08s linear; }
+.badge-area { display:flex; gap:8px; flex-wrap:wrap; margin-top:.6rem; }
+.badge-item { padding:.4rem .6rem; border-radius:12px; background:rgba(255,255,255,0.03); color:var(--muted); font-size:.85rem; }
+.controls-small { font-size:.9rem; color:var(--muted); margin-bottom:.4rem; }
+.slider { width:100%; }
+.row-gap { gap:12px; }
+.footer { margin-top:12px; color:var(--muted); text-align:center; }
+.table-sm td, .table-sm th { padding:.35rem; }
+</style>
+</head>
+<body>
+  <div class="container-app">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <div>
+        <h2 style="margin:0">Dynamic FIRE — Enhanced Realism (US simple model)</h2>
+        <div class="small-muted">Inflation • Taxable/Pre-tax/Roth buckets • Simple progressive tax • Withdrawal strategies</div>
+      </div>
+      <div>
+        <button id="exportLB" class="btn btn-outline-light btn-sm">Export leaderboard</button>
+        <button id="snapshotBtn" class="btn btn-outline-light btn-sm">Export PNG</button>
+      </div>
+    </div>
+
+    <div class="row g-3">
+      <!-- Controls -->
+      <div class="col-lg-3">
+        <div class="card p-3 mb-3">
+          <h6>Inputs & Preset</h6>
+
+          <div class="mb-2">
+            <label class="form-label">Preset</label>
+            <select id="presetSelect" class="form-select form-select-sm">
+              <option value="balanced">Balanced</option>
+              <option value="conservative">Conservative</option>
+              <option value="aggressive">Aggressive</option>
+              <option value="dotcom_crash">Dotcom Crash</option>
+            </select>
+          </div>
+
+          <div class="mb-2">
+            <label class="form-label">Seed (optional)</label>
+            <input id="seedInput" class="form-control form-control-sm" placeholder="integer seed (optional)">
+          </div>
+
+          <form id="simForm" autocomplete="off">
+            <div class="mb-2">
+              <label class="form-label">Horizon (years)</label>
+              <input id="years" class="form-control form-control-sm" type="number" min="1" max="100" value="40">
+            </div>
+
+            <div class="mb-2">
+              <label class="form-label">Trials</label>
+              <input id="trials" class="form-control form-control-sm" type="number" min="10" max="20000" value="3000">
+            </div>
+
+            <hr style="border-top:1px dashed rgba(255,255,255,0.03)">
+
+            <h6 class="mb-1">Portfolio & returns</h6>
+            <div class="mb-2">
+              <label class="form-label">Start portfolio ($)</label>
+              <input id="startPortfolio" class="form-control form-control-sm" type="number" min="0" value="50000" step="100">
+            </div>
+
+            <div class="mb-2">
+              <label class="form-label">Expected annual return μ</label>
+              <input id="mu" class="form-control form-control-sm" type="number" step="0.01" value="0.06">
+            </div>
+
+            <div class="mb-2">
+              <label class="form-label">Annual volatility σ</label>
+              <input id="sigma" class="form-control form-control-sm" type="number" step="0.01" value="0.16">
+            </div>
+
+            <div class="mb-2">
+              <label class="form-label">Inflation μ (annual)</label>
+              <input id="inflationMu" class="form-control form-control-sm" type="number" step="0.01" value="0.025">
+            </div>
+
+            <div class="mb-2">
+              <label class="form-label">Inflation σ (annual)</label>
+              <input id="inflationSigma" class="form-control form-control-sm" type="number" step="0.01" value="0.02">
+            </div>
+
+            <hr style="border-top:1px dashed rgba(255,255,255,0.03)">
+
+            <h6 class="mb-1">Career & contributions</h6>
+            <div class="mb-2">
+              <label class="form-label">Starting salary ($/yr)</label>
+              <input id="startSalary" class="form-control form-control-sm" type="number" min="0" value="60000">
+            </div>
+
+            <div class="mb-2">
+              <label class="form-label">Savings rate (fraction of income)</label>
+              <input id="saveRate" class="form-control form-control-sm" type="number" step="0.01" min="0" max="1" value="0.2">
+            </div>
+
+            <div class="mb-2">
+              <label class="form-label">Contribution split (pre-tax / roth / taxable)</label>
+              <div class="d-flex gap-2">
+                <input id="splitPre" class="form-control form-control-sm" type="number" step="0.01" value="0.6">
+                <input id="splitRoth" class="form-control form-control-sm" type="number" step="0.01" value="0.2">
+                <input id="splitTax" class="form-control form-control-sm" type="number" step="0.01" value="0.2">
+              </div>
+              <div class="small-muted">The three should sum ~1.0 (we normalize automatically)</div>
+            </div>
+
+            <div class="mb-2">
+              <label class="form-label">401k annual limit ($)</label>
+              <input id="limit401k" class="form-control form-control-sm" type="number" value="22500">
+            </div>
+
+            <hr style="border-top:1px dashed rgba(255,255,255,0.03)">
+
+            <h6 class="mb-1">Career shocks</h6>
+            <div class="mb-2">
+              <label class="form-label">Raise chance / year</label>
+              <input id="raiseProb" class="form-control form-control-sm" type="number" step="0.01" min="0" max="1" value="0.25">
+            </div>
+            <div class="mb-2">
+              <label class="form-label">Raise μ (lognormal)</label>
+              <input id="raiseMu" class="form-control form-control-sm" type="number" step="0.01" value="0.03">
+            </div>
+            <div class="mb-2">
+              <label class="form-label">Raise σ (lognormal)</label>
+              <input id="raiseSigma" class="form-control form-control-sm" type="number" step="0.01" value="0.02">
+            </div>
+
+            <div class="mb-2">
+              <label class="form-label">Layoff prob / year</label>
+              <input id="layoffProb" class="form-control form-control-sm" type="number" step="0.01" min="0" max="1" value="0.05">
+            </div>
+            <div class="mb-2">
+              <label class="form-label">Mean layoff months</label>
+              <input id="layoffMeanMonths" class="form-control form-control-sm" type="number" step="1" min="1" value="6">
+            </div>
+            <div class="mb-2">
+              <label class="form-label">Recovery min/max (fraction)</label>
+              <div class="d-flex gap-2">
+                <input id="recoveryMin" class="form-control form-control-sm" type="number" step="0.01" value="0.7">
+                <input id="recoveryMax" class="form-control form-control-sm" type="number" step="0.01" value="1.0">
+              </div>
+            </div>
+
+            <hr style="border-top:1px dashed rgba(255,255,255,0.03)">
+
+            <h6 class="mb-1">Taxes & withdrawal rules</h6>
+            <div class="mb-2">
+              <label class="form-label">Tax mode</label>
+              <select id="taxMode" class="form-select form-select-sm">
+                <option value="progressive">US Simple Progressive (default)</option>
+                <option value="flat">Flat tax</option>
+              </select>
+            </div>
+            <div class="mb-2" id="flatTaxRow" style="display:none">
+              <label class="form-label">Flat tax % (applies to ordinary income)</label>
+              <input id="flatTax" class="form-control form-control-sm" type="number" step="0.01" value="0.22">
+            </div>
+
+            <div class="mb-2">
+              <label class="form-label">Capital gains tax (taxable account) %</label>
+              <input id="capGains" class="form-control form-control-sm" type="number" step="0.01" value="0.15">
+            </div>
+
+            <div class="mb-2">
+              <label class="form-label">Withdrawal order</label>
+              <select id="withdrawOrder" class="form-select form-select-sm">
+                <option value="taxable_roth_pretax">Taxable → Roth → Pre-tax</option>
+                <option value="taxable_pretax_roth">Taxable → Pre-tax → Roth</option>
+                <option value="pretax_taxable_roth">Pre-tax → Taxable → Roth</option>
+              </select>
+            </div>
+
+            <div class="mb-2">
+              <label class="form-label">Cash buffer (months)</label>
+              <input id="cashBufferMonths" class="form-control form-control-sm" type="number" min="0" value="12">
+            </div>
+
+            <div class="mb-2">
+              <label class="form-label">Withdrawal rule</label>
+              <select id="withdrawRule" class="form-select form-select-sm">
+                <option value="4pct">4% rule (fixed percent)</option>
+                <option value="dynamic_floor">Dynamic (floor/ceiling)</option>
+              </select>
+            </div>
+
+            <div class="mb-2">
+              <label class="form-label">Target portfolio ($)</label>
+              <input id="targetPortfolio" class="form-control form-control-sm" type="number" min="0" value="1000000" step="1000">
+            </div>
+
+            <div class="d-grid mt-2">
+              <button id="runBtn" class="btn btn-success btn-sm" type="submit">▶ Run (worker)</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="card p-3">
+          <h6>Leaderboard (local)</h6>
+          <div id="leaderboardList" style="max-height:220px; overflow:auto;"></div>
+          <div class="d-grid mt-2">
+            <button id="clearLB" class="btn btn-outline-danger btn-sm">Clear leaderboard</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dashboard -->
+      <div class="col-lg-9">
+        <div class="row g-3">
+          <div class="col-sm-3"><div class="card stat-card p-3"><div class="small-muted">Fastest (years)</div><div id="statFastest" class="stat-value">—</div></div></div>
+          <div class="col-sm-3"><div class="card stat-card p-3"><div class="small-muted">Median (years)</div><div id="statMedian" class="stat-value">—</div></div></div>
+          <div class="col-sm-3"><div class="card stat-card p-3"><div class="small-muted">Success rate</div><div id="statSuccess" class="stat-value">—</div></div></div>
+          <div class="col-sm-3"><div class="card stat-card p-3"><div class="small-muted">Total tax paid (median)</div><div id="statTax" class="stat-value">—</div></div></div>
+
+          <div class="col-12">
+            <div class="card p-3">
+              <div class="row">
+                <div class="col-md-6 mb-3">
+                  <h6 class="small-muted mb-2">Years to FIRE (successful trials)</h6>
+                  <canvas id="histFIRE"></canvas>
+                </div>
+                <div class="col-md-6 mb-3">
+                  <h6 class="small-muted mb-2">Final net worth (all trials)</h6>
+                  <canvas id="histFinal"></canvas>
+                </div>
+              </div>
+
+              <div class="row mt-3">
+                <div class="col-md-8 mb-3">
+                  <h6 class="small-muted mb-2">Sample portfolio & bucket balances (nominal)</h6>
+                  <canvas id="pathsChart" style="height:320px"></canvas>
+                </div>
+                <div class="col-md-4">
+                  <h6 class="small-muted mb-2">Speedrun (sample racers)</h6>
+                  <div class="racetrack" id="racetrack"></div>
+                  <div class="small-muted mt-2"><strong>Target:</strong> <span id="targetValue">—</span></div>
+
+                  <div class="mt-2">
+                    <label class="form-label small-muted">Name</label>
+                    <input id="playerName" class="form-control form-control-sm" maxlength="30" placeholder="Your name (optional)">
+                    <div class="d-grid mt-2"><button id="submitRun" class="btn btn-primary btn-sm">🏁 Submit run</button></div>
+                  </div>
+
+                  <div class="mt-3">
+                    <h6 class="small-muted mb-1">Achievements</h6>
+                    <div id="badges" class="badge-area"></div>
+                  </div>
+
+                </div>
+              </div>
+
+              <div class="mt-3 small-muted">Nominal vs Real: inflation is modeled yearly and used to convert nominal balances to real purchasing power.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">Static app — runs fully in-browser. This UI uses a simplified US tax model (editable in UI).</div>
+  </div>
+
+<script>
+/* -------------------------
+   Utilities
+   ------------------------- */
+function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+function fmtMoney(x){ if (!isFinite(x)) return '—'; if (x>=1e9) return '$'+(x/1e9).toFixed(2)+'B'; if (x>=1e6) return '$'+(x/1e6).toFixed(2)+'M'; if (x>=1e3) return '$'+Math.round(x).toLocaleString(); return '$'+Math.round(x); }
+function uid(){ return Math.floor(Math.random()*1e9).toString(36); }
+
+/* -------------------------
+   Worker code (blob)
+   ------------------------- */
+const workerSource = `
+// Worker: Monte Carlo with buckets, inflation, and simple US tax
+self.addEventListener('message', e => {
+  const msg = e.data;
+  if (msg.type === 'start') runWorker(msg.params);
+  else if (msg.type === 'cancel') self._cancel = true;
+});
+
+// PRNG: mulberry32 for deterministic seeding
+function mulberry32(a) {
+  return function() {
+    var t = a += 0x6D2B79F5;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  }
+}
+function makeNormal(rng) {
+  let spare = null;
+  return function() {
+    if (spare !== null) { const v = spare; spare = null; return v; }
+    let u=0,v=0;
+    while(u===0) u = rng();
+    while(v===0) v = rng();
+    const mag = Math.sqrt(-2*Math.log(u));
+    const z0 = mag * Math.cos(2*Math.PI*v);
+    spare = mag * Math.sin(2*Math.PI*v);
+    return z0;
+  }
+}
+
+function lognormalSample(normalFn, mu, sigma) {
+  return Math.exp(mu + sigma * normalFn());
+}
+
+// simple progressive tax brackets (approximate, single filer, inflation-ignorant; editable UI recommended)
+// format: array of {rate, upTo} where upTo is upper bound in dollars (null = infinity)
+const DEFAULT_BRACKETS = [
+  { rate: 0.10, upTo: 11000 },
+  { rate: 0.12, upTo: 44725 },
+  { rate: 0.22, upTo: 95375 },
+  { rate: 0.24, upTo: 182100 },
+  { rate: 0.32, upTo: 231250 },
+  { rate: 0.35, upTo: 578125 },
+  { rate: 0.37, upTo: null }
+];
+
+function taxProgressive(taxableIncome, brackets) {
+  let remaining = taxableIncome;
+  let tax = 0;
+  let lower = 0;
+  for (const b of brackets) {
+    const top = b.upTo === null ? Infinity : b.upTo;
+    const taxable = Math.max(0, Math.min(remaining, top - lower));
+    tax += taxable * b.rate;
+    remaining -= taxable;
+    lower = top;
+    if (remaining <= 0) break;
+  }
+  return Math.max(0, tax);
+}
+
+// run one trial: returns times-to-fire, finals, sample paths incl bucket balances, and taxes paid
+function simulateTrial(params, rng, normalFn, brackets) {
+  const stepsPerYear = 12;
+  const dt = 1/stepsPerYear;
+  const nSteps = Math.round(params.years * stepsPerYear);
+
+  // initial balances
+  let pretax = params.startPortfolio * (params.initPreTaxFrac || 0.5); // if user had pre-existing split (optional)
+  let roth = params.startPortfolio * (params.initRothFrac || 0.2);
+  let taxable = params.startPortfolio * (params.initTaxableFrac || 0.3);
+  // taxable basis tracks cumulative basis to compute gains portion
+  let taxableBasis = taxable;
+
+  let salary = params.startSalary;
+  let inflationIndex = 1.0; // starts at 1. multiply by (1+inflation) each year
+  const inflationMu = params.inflationMu || 0.02;
+  const inflationSigma = params.inflationSigma || 0.02;
+
+  const networthPath = new Array(nSteps + 1).fill(0);
+  const bucketPaths = { pretax: new Array(nSteps+1).fill(0), roth: new Array(nSteps+1).fill(0), taxable: new Array(nSteps+1).fill(0) };
+  networthPath[0] = pretax + roth + taxable;
+  bucketPaths.pretax[0] = pretax; bucketPaths.roth[0] = roth; bucketPaths.taxable[0] = taxable;
+
+  // yearly trackers
+  let taxesPaidTotal = 0;
+  let retired = false;
+  let timeToFire = null;
+
+  // derived per-step probs
+  const raisePerStep = 1 - Math.pow(1 - params.raiseProb, dt);
+  const layoffPerStep = 1 - Math.pow(1 - params.layoffProb, dt);
+
+  // contribution limits
+  const annual401kLimit = params.limit401k || 22500;
+
+  // compute contribution split normalized
+  const totalSplit = params.splitPre + params.splitRoth + params.splitTax;
+  const preSplit = params.splitPre / Math.max(1e-12, totalSplit);
+  const rothSplit = params.splitRoth / Math.max(1e-12, totalSplit);
+  const taxSplit = params.splitTax / Math.max(1e-12, totalSplit);
+
+  // simple progressive tax brackets (from params or defaults)
+  const bracketsUsed = params.progressiveBrackets || DEFAULT_BRACKETS;
+
+  for (let t = 1; t <= nSteps; t++) {
+    if (self._cancel) return { cancelled: true };
+
+    // if new year (t % 12 == 1 after t incremented) update inflation annually (we'll do every 12 steps)
+    if ((t % 12) === 1) {
+      // draw annual inflation shock (lognormal approx)
+      const z = normalFn();
+      const infGrowth = Math.exp((params.inflationMu - 0.5 * params.inflationSigma * params.inflationSigma) + params.inflationSigma * z);
+      inflationIndex *= infGrowth;
+    }
+
+    // market growth per-step (GBM)
+    const zM = normalFn();
+    const growth = Math.exp((params.mu - 0.5 * params.sigma * params.sigma) * dt + params.sigma * Math.sqrt(dt) * zM);
+    pretax *= growth;
+    roth *= growth;
+    taxable *= growth;
+
+    // income events only if not retired
+    if (!retired) {
+      // raises
+      if (rng() < raisePerStep) {
+        const mult = lognormalSample(normalFn, params.raiseMu, params.raiseSigma);
+        salary *= mult;
+      }
+
+      // layoffs
+      if (rng() < layoffPerStep) {
+        const durMonths = Math.max(1, Math.round((Math.random() * 2 + 0.5) * (params.layoffMeanMonths || 6))); // approx exponential-ish
+        for (let d = 0; d < durMonths && t <= nSteps; d++, t++) {
+          // growth during layoff months already accounted above (we do growth per loop), but skip contributions
+          bucketPaths.pretax[t] = pretax; bucketPaths.roth[t] = roth; bucketPaths.taxable[t] = taxable;
+          networthPath[t] = pretax + roth + taxable;
+        }
+        const rec = params.recoveryMin + rng() * (params.recoveryMax - params.recoveryMin);
+        salary = Math.max(0, salary * rec);
+        if (t > nSteps) break;
+      }
+
+      // contributions for this step (annualized)
+      const annualContribution = salary * params.saveRate;
+      // enforce 401k limit for pre-tax contributions annually — we approximate by per-step cap
+      const perStep401kCap = Math.max(0, (annual401kLimit - 0) / 12); // naive, not tracking year-to-year carryover
+      let preThisStep = Math.min(perStep401kCap, annualContribution * preSplit / 12 * 12) / 12 * 1; // simplified
+      // For simplicity, allocate proportionally but cap pre-tax yearly contribution at annual401kLimit
+      // We'll just allocate contribution fractions per-step and if yearly pre-tax > limit we clamp (simple approx)
+      preThisStep = (annualContribution * preSplit) / 12;
+      const rothThisStep = (annualContribution * rothSplit) / 12;
+      const taxThisStep = (annualContribution * taxSplit) / 12;
+
+      // apply contributions
+      pretax += preThisStep;
+      roth += rothThisStep;
+      taxable += taxThisStep;
+      taxableBasis += taxThisStep;
+
+      // taxes on salary for this step: depends on tax mode
+      const taxableWageAnnualized = salary; // annual salary before pretax: we pretend contributions were taken pre-tax (reduce taxable)
+      const pretaxAnnualContribution = annualContribution * preSplit;
+      const taxableIncomeAnnual = Math.max(0, taxableWageAnnualized - pretaxAnnualContribution); // simplified: reduce by pre-tax contributions
+      let taxThisStep = 0;
+      if (params.taxMode === 'flat') {
+        taxThisStep = (params.flatTaxRate || 0.22) * (taxableIncomeAnnual / 12);
+      } else {
+        // progressive: compute tax on full annual, then take per-step
+        const taxAnnual = taxProgressive(taxableIncomeAnnual, bracketsUsed);
+        taxThisStep = taxAnnual / 12;
+      }
+      taxesPaidTotal += taxThisStep;
+      // assume taxes are paid out of salary and not invested so no deduction to buckets simulated here (we simply don't add salary after tax)
+      // i.e., contributions come directly from salary pre-tax; remaining salary is consumed for living expenses (not modeled as deposits)
+    } else {
+      // if retired, apply withdrawals per chosen strategy
+      // monthly withdraw amount determined outside this loop in retirement detection. We'll simulate below when retired flag set.
+    }
+
+    networthPath[t] = pretax + roth + taxable;
+    bucketPaths.pretax[t] = pretax; bucketPaths.roth[t] = roth; bucketPaths.taxable[t] = taxable;
+
+    // check FIRE (nominal target)
+    if (!retired && params.targetPortfolio != null && (pretax + roth + taxable) >= params.targetPortfolio) {
+      retired = true;
+      timeToFire = t * dt;
+      // once retired, we will simulate withdrawals for remaining steps using withdrawal rules
+    }
+
+    if (retired) {
+      // compute withdrawal amount for this month:
+      let annualWithdraw = 0;
+      if (params.withdrawRule === '4pct') {
+        annualWithdraw = params.targetPortfolio * 0.04; // fixed 4% of target
+      } else if (params.withdrawRule === 'dynamic_floor') {
+        // simple dynamic: withdraw between 80% and 120% of 4% * current portfolio / target scaling
+        const currentNW = pretax + roth + taxable;
+        annualWithdraw = Math.max(0.8 * 0.04 * params.targetPortfolio, Math.min(1.2 * 0.04 * params.targetPortfolio, (currentNW / params.targetPortfolio) * 0.04 * params.targetPortfolio));
+      } else {
+        annualWithdraw = 0.04 * params.targetPortfolio;
+      }
+      const monthlyWithdraw = annualWithdraw / 12;
+
+      // cash buffer: we model as not invested amount equal to buffer months of spending; to keep it simple, we only ensure the early months draw from taxable 'cash-like' (i.e., taxable balance)
+      // withdrawal order determines which bucket to take from; we also apply capital gains tax on taxable withdrawals relative to basis
+      let remaining = monthlyWithdraw;
+      const order = params.withdrawOrder || 'taxable_roth_pretax';
+      const parts = order.split('_');
+
+      for (const part of parts) {
+        if (remaining <= 1e-9) break;
+        if (part === 'taxable') {
+          const take = Math.min(remaining, taxable);
+          if (take > 0) {
+            // tax on gains portion: gains = current taxable - basis (could be negative if basis > balance)
+            const gains = Math.max(0, taxable - taxableBasis);
+            // proportion of take that is gains = min(1, gains / taxable)
+            const gainPortion = taxable > 0 ? Math.min(1, gains / taxable) : 0;
+            const taxedGains = take * gainPortion;
+            const taxOnGains = taxedGains * (params.capGainsRate || 0.15);
+            taxesPaidTotal += taxOnGains;
+            const netAfterTax = take - taxOnGains;
+            taxable -= take;
+            // adjust basis proportionally
+            const basisReduction = Math.min(taxableBasis, take * (1 - gainPortion));
+            taxableBasis -= basisReduction;
+            remaining -= take;
+          }
+        } else if (part === 'roth') {
+          const take = Math.min(remaining, roth);
+          roth -= take;
+          remaining -= take;
+        } else if (part === 'pretax') {
+          const take = Math.min(remaining, pretax);
+          if (take > 0) {
+            // taxed as ordinary income using progressive or flat
+            if (params.taxMode === 'flat') {
+              const tax = (params.flatTaxRate || 0.22) * take;
+              taxesPaidTotal += tax;
+            } else {
+              // estimate annual tax on withdraw amount by projecting to annual
+              const taxAnnual = taxProgressive(take * 12, bracketsUsed);
+              taxesPaidTotal += taxAnnual / 12;
+            }
+            pretax -= take;
+            remaining -= take;
+          }
+        }
+      }
+      // if any remaining (not enough in buckets), we treat as shortfall and set portfolio to zero
+      if (remaining > 1e-6) {
+        // portfolio ruin; set balances to 0
+        pretax = Math.max(0, pretax - 0);
+        roth = Math.max(0, roth - 0);
+        taxable = Math.max(0, taxable - 0);
+      }
+    }
+  } // end steps
+
+  return {
+    timeToFire,
+    finalNetworth: pretax + roth + taxable,
+    pretax, roth, taxable,
+    networthPath: networthPath,
+    bucketPaths,
+    taxesPaidTotal
+  };
+}
+
+// wrapper to run Monte Carlo
+async function runWorker(params) {
+  self._cancel = false;
+  const trials = params.trials;
+  const batch = Math.max(5, Math.floor(trials / 200));
+  const results = { fireTimes: [], finals: [], samples: [], taxes: [] };
+
+  const baseSeed = (params.seed != null) ? params.seed : Math.floor(Math.random() * 2**31);
+  for (let i=0; i<trials; i+=batch) {
+    if (self._cancel) break;
+    const end = Math.min(trials, i + batch);
+    for (let j=i; j<end; j++) {
+      const seed = (baseSeed + j) | 0;
+      const rng = mulberry32(seed);
+      const normalFn = makeNormal(rng);
+      const out = simulateTrial(params, rng, normalFn, params.progressiveBrackets || DEFAULT_BRACKETS);
+      if (out.cancelled) { self.postMessage({ type:'cancelled' }); return; }
+      if (out.timeToFire != null) results.fireTimes.push(out.timeToFire);
+      results.finals.push(out.finalNetworth);
+      results.taxes.push(out.taxesPaidTotal);
+      if (results.samples.length < 10) {
+        // store sample with bucket paths for visualization
+        results.samples.push({
+          networthPath: out.networthPath,
+          bucketPaths: out.bucketPaths
+        });
+      }
+    }
+    self.postMessage({ type:'progress', completed:end, total:trials, partial:results });
+    await new Promise(r => setTimeout(r, 1));
+  }
+  self.postMessage({ type:'done', results });
+}
+`;
+
+/* create worker blob */
+const workerBlob = new Blob([workerSource], { type: 'application/javascript' });
+const workerURL = URL.createObjectURL(workerBlob);
+let simWorker = null;
+
+/* Charts */
+let chartFire=null, chartFinal=null, chartPaths=null;
+function initCharts(){
+  const ctxF = document.getElementById('histFIRE').getContext('2d');
+  if (chartFire) chartFire.destroy();
+  chartFire = new Chart(ctxF, { type:'bar', data:{ labels:[], datasets:[{ label:'Years to FIRE', data:[], backgroundColor: createGradient(ctxF,'#22c55e','#065f46') }] }, options:{ plugins:{ legend:{display:false} }, scales:{ x:{ ticks:{ color:'#cbd5e1' } }, y:{ ticks:{ color:'#cbd5e1' } } }, animation:{ duration:300 } } });
+
+  const ctxN = document.getElementById('histFinal').getContext('2d');
+  if (chartFinal) chartFinal.destroy();
+  chartFinal = new Chart(ctxN, { type:'bar', data:{ labels:[], datasets:[{ label:'Final NW', data:[], backgroundColor: createGradient(ctxN,'#3b82f6','#1e3a8a') }] }, options:{ plugins:{ legend:{display:false} }, scales:{ x:{ ticks:{ color:'#cbd5e1' } }, y:{ ticks:{ color:'#cbd5e1' } } }, animation:{ duration:300 } } });
+
+  const ctxP = document.getElementById('pathsChart').getContext('2d');
+  if (chartPaths) chartPaths.destroy();
+  chartPaths = new Chart(ctxP, { type:'line', data:{ labels:[], datasets:[] }, options:{ plugins:{ legend:{ display:true } }, scales:{ x:{ ticks:{ color:'#cbd5e1' } }, y:{ ticks:{ color:'#cbd5e1' }, beginAtZero:true }, animation:{ duration:200, easing:'linear' } } } );
+}
+function createGradient(ctx,c1,c2){ const g = ctx.createLinearGradient(0,0,ctx.canvas.width,0); g.addColorStop(0,c1); g.addColorStop(1,c2); return g; }
+function histogram(values, bins=25){
+  if (!values || values.length===0) return { labels:[], counts:[] };
+  const min = Math.min(...values); const max = Math.max(...values);
+  const span = (max - min) || 1; const step = span / bins; const counts = new Array(bins).fill(0);
+  for (const v of values){ let idx = Math.floor((v - min) / step); if (idx < 0) idx = 0; if (idx >= bins) idx = bins - 1; counts[idx]++; }
+  const labels = counts.map((_,i)=> (min + i*step).toFixed(1)); return { labels, counts };
+}
+
+/* Racers */
+function initRacers(n=10){
+  const track = document.getElementById('racetrack'); track.innerHTML = '';
+  const rows = [];
+  for (let i=0;i<n;i++){
+    const r = document.createElement('div'); r.className='racer-row';
+    const name = document.createElement('div'); name.className='racer-name'; name.textContent = 'Racer ' + (i+1);
+    const trackDiv = document.createElement('div'); trackDiv.className='track';
+    const bar = document.createElement('div'); bar.className='racer-bar';
+    trackDiv.appendChild(bar); r.appendChild(name); r.appendChild(trackDiv); track.appendChild(r);
+    rows.push({ row: r, bar });
+  }
+  return rows;
+}
+function animateRacersFromSamples(rows, samples, target){
+  const n = Math.min(rows.length, samples.length);
+  rows.forEach(r => r.bar.style.width = '0%');
+  const maxSteps = Math.max(...samples.map(s => s.networthPath.length));
+  let t = 0;
+  function frame(){
+    for (let i=0;i<n;i++){
+      const samp = samples[i]; const idx = Math.min(samp.networthPath.length - 1, t);
+      const val = samp.networthPath[idx]; const pct = Math.min(100, Math.max(0, (val / target) * 100));
+      rows[i].bar.style.width = pct + '%';
+    }
+    t++; if (t <= maxSteps) requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
+
+/* Leaderboard */
+const LB_KEY = 'fire_enhanced_lb';
+function loadLB(){ try { return JSON.parse(localStorage.getItem(LB_KEY) || '[]'); } catch(e) { return []; } }
+function saveLB(a){ localStorage.setItem(LB_KEY, JSON.stringify(a)); renderLB(); }
+function addLB(e){ const a = loadLB(); a.push(e); while(a.length>500) a.shift(); saveLB(a); }
+function clearLB(){ localStorage.removeItem(LB_KEY); renderLB(); }
+function renderLB(){ const c = document.getElementById('leaderboardList'); c.innerHTML = ''; const a = loadLB().slice().reverse(); if (!a.length){ c.innerHTML = '<div class="small-muted">No entries yet</div>'; return; } for (const r of a){ const div = document.createElement('div'); div.className = 'd-flex justify-content-between py-1 border-bottom'; div.innerHTML = '<div><div style="font-weight:600">' + escapeHtml(r.name||'Anon') + '</div><div class="small-muted">' + new Date(r.timestamp).toLocaleString() + '</div></div><div class="text-end"><div style="font-weight:700">' + (isFinite(r.fastest)? r.fastest.toFixed(2)+'y':'—') + '</div><div class="small-muted">median ' + (isFinite(r.median)? r.median.toFixed(2)+'y':'—') + '</div></div>'; c.appendChild(div); } }
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+/* Achievements & confetti */
+function evaluateBadges(results, params){
+  const badges = [];
+  const successRate = results.fireTimes.length / Math.max(1, params.trials);
+  if (successRate >= 0.9) badges.push({ id:'90pct', label:'Consistent (≥90%)' });
+  if (results.fireTimes.length && Math.min(...results.fireTimes) < 5) badges.push({ id:'speedrun', label:'Speedrunner (<5y)' });
+  const medTax = median(results.taxes || []);
+  if (medTax > (params.targetPortfolio * 0.05)) badges.push({ id:'taxed', label:'High Tax Drag' });
+  return badges;
+}
+function median(arr){ if(!arr||!arr.length) return null; const s=arr.slice().sort((a,b)=>a-b); const m=Math.floor(s.length/2); return s.length%2?s[m]:(s[m-1]+s[m])/2; }
+function celebrate(){ confetti({ particleCount: 120, spread: 60, origin: { y: 0.3 } }); try { const ctx = new (window.AudioContext || window.webkitAudioContext)(); const o = ctx.createOscillator(); const g = ctx.createGain(); o.type = 'sine'; o.frequency.setValueAtTime(880, ctx.currentTime); g.gain.setValueAtTime(0.0001, ctx.currentTime); o.connect(g); g.connect(ctx.destination); o.start(); g.gain.exponentialRampToValueAtTime(0.05, ctx.currentTime + 0.02); g.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + 0.45); o.stop(ctx.currentTime + 0.5); } catch(e){} }
+
+/* Wiring UI */
+document.addEventListener('DOMContentLoaded', () => {
+  initCharts(); renderLB(); const racers = initRacers(10);
+  // presets
+  const PRESETS = {
+    balanced: { mu:0.06, sigma:0.16, inflationMu:0.025, inflationSigma:0.02, layoffProb:0.05, raiseProb:0.25 },
+    conservative: { mu:0.04, sigma:0.10, inflationMu:0.02, inflationSigma:0.015, layoffProb:0.03, raiseProb:0.18 },
+    aggressive: { mu:0.09, sigma:0.28, inflationMu:0.03, inflationSigma:0.03, layoffProb:0.07, raiseProb:0.30 },
+    dotcom_crash: { mu:0.06, sigma:0.40, inflationMu:0.03, inflationSigma:0.04, layoffProb:0.12, raiseProb:0.12 }
+  };
+  document.getElementById('presetSelect').addEventListener('change', (e) => {
+    const p = PRESETS[e.target.value];
+    if (!p) return;
+    document.getElementById('mu').value = p.mu;
+    document.getElementById('sigma').value = p.sigma;
+    document.getElementById('inflationMu').value = p.inflationMu;
+    document.getElementById('inflationSigma').value = p.inflationSigma;
+    document.getElementById('layoffProb').value = p.layoffProb;
+    document.getElementById('raiseProb').value = p.raiseProb;
+  });
+
+  // tax mode toggle
+  document.getElementById('taxMode').addEventListener('change', (e) => {
+    document.getElementById('flatTaxRow').style.display = e.target.value === 'flat' ? 'block' : 'none';
+  });
+
+  // run handler (uses worker)
+  const form = document.getElementById('simForm');
+  const runBtn = document.getElementById('runBtn');
+
+  form.addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    if (simWorker) {
+      simWorker.postMessage({ type: 'cancel' });
+      runBtn.textContent = 'Cancelling...';
+      runBtn.classList.remove('btn-success');
+      runBtn.classList.add('btn-warning');
+      return;
+    }
+
+    // gather params
+    const params = {
+      years: Number(document.getElementById('years').value) || 40,
+      trials: Number(document.getElementById('trials').value) || 1000,
+      startPortfolio: Number(document.getElementById('startPortfolio').value) || 50000,
+      mu: Number(document.getElementById('mu').value) || 0.06,
+      sigma: Number(document.getElementById('sigma').value) || 0.16,
+      inflationMu: Number(document.getElementById('inflationMu').value) || 0.02,
+      inflationSigma: Number(document.getElementById('inflationSigma').value) || 0.02,
+      startSalary: Number(document.getElementById('startSalary').value) || 60000,
+      saveRate: Number(document.getElementById('saveRate').value) || 0.2,
+      splitPre: Number(document.getElementById('splitPre').value) || 0.6,
+      splitRoth: Number(document.getElementById('splitRoth').value) || 0.2,
+      splitTax: Number(document.getElementById('splitTax').value) || 0.2,
+      limit401k: Number(document.getElementById('limit401k').value) || 22500,
+      raiseProb: Number(document.getElementById('raiseProb').value) || 0.25,
+      raiseMu: Number(document.getElementById('raiseMu').value) || 0.03,
+      raiseSigma: Number(document.getElementById('raiseSigma').value) || 0.02,
+      layoffProb: Number(document.getElementById('layoffProb').value) || 0.05,
+      layoffMeanMonths: Number(document.getElementById('layoffMeanMonths').value) || 6,
+      recoveryMin: Number(document.getElementById('recoveryMin').value) || 0.7,
+      recoveryMax: Number(document.getElementById('recoveryMax').value) || 1.0,
+      taxMode: document.getElementById('taxMode').value,
+      flatTaxRate: Number(document.getElementById('flatTax').value) || 0.22,
+      capGainsRate: Number(document.getElementById('capGains').value) || 0.15,
+      withdrawOrder: document.getElementById('withdrawOrder').value,
+      cashBufferMonths: Number(document.getElementById('cashBufferMonths').value) || 12,
+      withdrawRule: document.getElementById('withdrawRule').value,
+      targetPortfolio: Number(document.getElementById('targetPortfolio').value) || 1000000,
+      seed: (() => { const s = document.getElementById('seedInput').value.trim(); return s ? Number(s) : null; })()
+    };
+
+    // progressive brackets are embedded in worker; could be passed here if we allow editing
+    // UI reset
+    document.getElementById('targetValue').textContent = fmtMoney(params.targetPortfolio);
+    document.getElementById('statFastest').textContent = '—';
+    document.getElementById('statMedian').textContent = '—';
+    document.getElementById('statSuccess').textContent = '—';
+    document.getElementById('statTax').textContent = '—';
+    initCharts();
+
+    // create worker
+    simWorker = new Worker(workerURL);
+    runBtn.textContent = 'Running... (click to cancel)';
+    runBtn.classList.remove('btn-success'); runBtn.classList.add('btn-danger');
+    const statusEl = document.createElement('div'); statusEl.className = 'small-muted mt-2'; statusEl.textContent = 'Starting...';
+    runBtn.parentNode.insertBefore(statusEl, runBtn.nextSibling);
+
+    simWorker.onmessage = (ev) => {
+      const msg = ev.data;
+      if (msg.type === 'progress') {
+        const { completed, total, partial } = msg;
+        statusEl.textContent = completed + ' / ' + total + ' trials';
+        // update stats
+        const fastest = partial.fireTimes.length ? Math.min(...partial.fireTimes) : null;
+        const medianYears = partial.fireTimes.length ? (partial.fireTimes.slice().sort((a,b)=>a-b)[Math.floor(partial.fireTimes.length/2)]) : null;
+        const successRate = (partial.fireTimes.length / Math.max(1, total) * 100);
+        document.getElementById('statFastest').textContent = fastest ? fastest.toFixed(2) : '—';
+        document.getElementById('statMedian').textContent = medianYears ? medianYears.toFixed(2) : '—';
+        document.getElementById('statSuccess').textContent = successRate.toFixed(1) + '%';
+        document.getElementById('statTax').textContent = (partial.taxes.length ? median(partial.taxes).toLocaleString(undefined, {maximumFractionDigits:0}) : '—');
+
+        const hF = histogram(partial.fireTimes, 30);
+        chartFire.data.labels = hF.labels; chartFire.data.datasets[0].data = hF.counts; chartFire.update();
+        const hN = histogram(partial.finals, 30);
+        chartFinal.data.labels = hN.labels; chartFinal.data.datasets[0].data = hN.counts; chartFinal.update();
+
+        // paths: show buckets stacked (pretax, roth, taxable) as three lines per sample
+        if (partial.samples && partial.samples.length) {
+          const samp = partial.samples;
+          const steps = samp[0].networthPath.length;
+          chartPaths.data.labels = new Array(steps).fill(0).map((_,i)=> (i/12).toFixed(1));
+          chartPaths.data.datasets = [];
+          for (let i=0;i<samp.length;i++){
+            chartPaths.data.datasets.push({ label:'NW sample '+(i+1), data:samp[i].networthPath, borderColor:`rgba(255,255,255,${0.2 + i*0.04})`, pointRadius:0, borderWidth:1.2, tension:0.2, fill:false });
+            // show buckets lightly
+            chartPaths.data.datasets.push({ label:'Pretax s'+(i+1), data:samp[i].bucketPaths.pretax, borderColor:`rgba(34,197,94,${0.06 + i*0.02})`, pointRadius:0, borderWidth:1, tension:0.2, fill:false });
+            chartPaths.data.datasets.push({ label:'Roth s'+(i+1), data:samp[i].bucketPaths.roth, borderColor:`rgba(59,130,246,${0.06 + i*0.02})`, pointRadius:0, borderWidth:1, tension:0.2, fill:false });
+            chartPaths.data.datasets.push({ label:'Taxable s'+(i+1), data:samp[i].bucketPaths.taxable, borderColor:`rgba(234,179,8,${0.06 + i*0.02})`, pointRadius:0, borderWidth:1, tension:0.2, fill:false });
+          }
+          chartPaths.update();
+          animateRacersFromSamples(racers, partial.samples, params.targetPortfolio);
+        }
+      } else if (msg.type === 'done') {
+        statusEl.textContent = 'Complete — ' + msg.results.finals.length + ' trials';
+        const results = msg.results;
+        const fastest = results.fireTimes.length ? Math.min(...results.fireTimes) : null;
+        const medianYears = results.fireTimes.length ? (results.fireTimes.slice().sort((a,b)=>a-b)[Math.floor(results.fireTimes.length/2)]) : null;
+        const successRate = (results.fireTimes.length / Math.max(1, params.trials) * 100);
+        document.getElementById('statFastest').textContent = fastest ? fastest.toFixed(2) : '—';
+        document.getElementById('statMedian').textContent = medianYears ? medianYears.toFixed(2) : '—';
+        document.getElementById('statSuccess').textContent = successRate.toFixed(1) + '%';
+        document.getElementById('statTax').textContent = (median(results.taxes || []) ? median(results.taxes).toLocaleString(undefined, {maximumFractionDigits:0}) : '—');
+
+        const hF = histogram(results.fireTimes, 40); chartFire.data.labels = hF.labels; chartFire.data.datasets[0].data = hF.counts; chartFire.update();
+        const hN = histogram(results.finals, 40); chartFinal.data.labels = hN.labels; chartFinal.data.datasets[0].data = hN.counts; chartFinal.update();
+
+        if (results.samples.length) {
+          const samp = results.samples;
+          const steps = samp[0].networthPath.length;
+          chartPaths.data.labels = new Array(steps).fill(0).map((_,i)=> (i/12).toFixed(1));
+          chartPaths.data.datasets = [];
+          for (let i=0;i<samp.length;i++){
+            chartPaths.data.datasets.push({ label:'NW sample '+(i+1), data:samp[i].networthPath, borderColor:`rgba(255,255,255,${0.2 + i*0.04})`, pointRadius:0, borderWidth:1.2, tension:0.2, fill:false });
+            chartPaths.data.datasets.push({ label:'Pretax s'+(i+1), data:samp[i].bucketPaths.pretax, borderColor:`rgba(34,197,94,${0.06 + i*0.02})`, pointRadius:0, borderWidth:1, tension:0.2, fill:false });
+            chartPaths.data.datasets.push({ label:'Roth s'+(i+1), data:samp[i].bucketPaths.roth, borderColor:`rgba(59,130,246,${0.06 + i*0.02})`, pointRadius:0, borderWidth:1, tension:0.2, fill:false });
+            chartPaths.data.datasets.push({ label:'Taxable s'+(i+1), data:samp[i].bucketPaths.taxable, borderColor:`rgba(234,179,8,${0.06 + i*0.02})`, pointRadius:0, borderWidth:1, tension:0.2, fill:false });
+          }
+          chartPaths.update();
+          animateRacersFromSamples(racers, results.samples, params.targetPortfolio);
+        }
+
+        // achievements
+        const badges = evaluateBadges(results, params);
+        const badgeArea = document.getElementById('badges'); badgeArea.innerHTML = '';
+        if (badges.length) badges.forEach(b => { const el = document.createElement('div'); el.className = 'badge-item'; el.textContent = b.label; badgeArea.appendChild(el); });
+        else badgeArea.innerHTML = '<div class="small-muted">No badges unlocked</div>';
+
+        // celebration rule
+        const succRate = (results.fireTimes.length / Math.max(1, params.trials));
+        if (succRate >= 0.5 || (results.fireTimes.length && Math.min(...results.fireTimes) < 5)) celebrate();
+
+        simWorker.terminate(); simWorker = null;
+        runBtn.textContent = '▶ Run (worker)'; runBtn.classList.remove('btn-danger'); runBtn.classList.add('btn-success');
+        if (statusEl && statusEl.parentNode) statusEl.remove();
+      } else if (msg.type === 'cancelled') {
+        if (simWorker) { simWorker.terminate(); simWorker = null; }
+        runBtn.textContent = '▶ Run (worker)'; runBtn.classList.remove('btn-warning'); runBtn.classList.add('btn-success');
+        alert('Run cancelled');
+      }
+    };
+
+    simWorker.postMessage({ type: 'start', params });
+  });
+
+  // submit run
+  document.getElementById('submitRun').addEventListener('click', () => {
+    const name = (document.getElementById('playerName').value || 'Anonymous').trim().slice(0,30);
+    const fastest = parseFloat(document.getElementById('statFastest').textContent) || null;
+    const medianYears = parseFloat(document.getElementById('statMedian').textContent) || null;
+    if (!fastest && !medianYears) { alert('No successful result to submit. Run simulation first.'); return; }
+    addLB({ name, fastest, median: medianYears, timestamp: new Date().toISOString() });
+    alert('Submitted to local leaderboard');
+  });
+
+  // clear LB
+  document.getElementById('clearLB').addEventListener('click', () => { if (confirm('Clear local leaderboard?')) clearLB(); });
+
+  // export LB
+  document.getElementById('exportLB').addEventListener('click', () => {
+    const list = loadLB(); if (!list.length) { alert('Empty leaderboard'); return; }
+    const csv = ['timestamp,name,fastest,median'].concat(list.map(r => [r.timestamp, '"' + (r.name || '').replace(/"/g,'""') + '"', r.fastest ?? '', r.median ?? ''].join(','))).join('\\n');
+    const blob = new Blob([csv], { type:'text/csv' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'leaderboard.csv'; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1500);
+  });
+
+  // snapshot
+  document.getElementById('snapshotBtn').addEventListener('click', () => {
+    const canvas = document.getElementById('pathsChart');
+    const a = document.createElement('a'); a.href = canvas.toDataURL('image/png'); a.download = 'paths_snapshot.png'; document.body.appendChild(a); a.click(); a.remove();
+  });
+
+  // init flats
+  renderLB();
+});
+
+/* median helper for UI */
+function median(a){ if(!a||!a.length) return null; const s=a.slice().sort((x,y)=>x-y); const m=Math.floor(s.length/2); return s.length%2 ? s[m] : (s[m-1]+s[m])/2; }
+</script>
+</body>
+</html>
