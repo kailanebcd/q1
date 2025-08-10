@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en" >
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dynamic FIRE Risk & Speed Simulator - Extended</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px auto;
+      max-width: 800px;
+      line-height: 1.4;
+      background: #f9f9f9;
+      color: #222;
+    }
+    label {
+      display: block;
+      margin-top: 12px;
+      font-weight: bold;
+    }
+    input[type="number"], input[type="text"] {
+      width: 100%;
+      padding: 6px 8px;
+      font-size: 1rem;
+      box-sizing: border-box;
+      margin-top: 4px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+      transition: border-color 0.3s;
+    }
+    input[type="number"]:focus {
+      border-color: #4caf50;
+      outline: none;
+    }
+    button {
+      margin-top: 16px;
+      padding: 10px 18px;
+      font-size: 1.1rem;
+      cursor: pointer;
+      border-radius: 5px;
+      background: #4caf50;
+      color: white;
+      border: none;
+      transition: background-color 0.3s;
+    }
+    button:hover:not(:disabled) {
+      background: #3a9e3a;
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    #runStatus {
+      margin-left: 10px;
+      font-size: 1rem;
+      color: #007700;
+      vertical-align: middle;
+    }
+    #progressBar {
+      display: inline-block;
+      vertical-align: middle;
+      width: 120px;
+      height: 14px;
+      background: #ddd;
+      border-radius: 8px;
+      overflow: hidden;
+      margin-left: 10px;
+      position: relative;
+    }
+    #progressBar > div {
+      background: #4caf50;
+      height: 100%;
+      width: 0;
+      transition: width 0.2s ease;
+    }
+    #resultArea {
+      margin-top: 24px;
+      background: #fff;
+      padding: 16px;
+      border-radius: 6px;
+      white-space: pre-wrap;
+      font-family: monospace;
+      min-height: 140px;
+      position: relative;
+      box-shadow: 0 0 8px rgba(0,0,0,0.1);
+    }
+    #leaderboard {
+      margin-top: 32px;
+      border-top: 2px solid #333;
+      padding-top: 16px;
+    }
+    #leaderboard h2 {
+      margin-bottom: 8px;
+    }
+    #leaderboardList {
+      list-style: none;
+      padding-left: 0;
+      max-height: 220px;
+      overflow-y: auto;
+    }
+    #leaderboardList li {
+      background: #e0f7e0;
+      margin-bottom: 6px;
+      padding: 10px;
+      border-radius: 4px;
+      opacity: 0;
+      transform: translateX(-20px);
+      animation: slideFadeIn 0.3s forwards;
+      font-family: monospace;
+    }
+    @keyframes slideFadeIn {
+      to {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+    .countup {
+      font-weight: bold;
+      color: #2c7;
+    }
+    .error {
+      color: #d33;
+      font-weight: bold;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+
+<h1>Dynamic FIRE Risk & Speed Simulator - Extended</h1>
+
+<form id="simForm" aria-label="Simulation input form">
+  <label for="years">Simulation Horizon (years):</label>
+  <input type="number" id="years" min="1" max="100" value="40" required />
+
+  <label for="saveRate">Savings Rate (0 to 1):</label>
+  <input type="number" id="saveRate" min="0" max="1" step="0.01" value="0.5" required />
+
+  <label>Contribution Splits (must sum to ~1):</label>
+  <input type="number" id="splitPre" min="0" max="1" step="0.01" value="0.33" required placeholder="Pre-tax (e.g. 0.33)" />
+  <input type="number" id="splitRoth" min="0" max="1" step="0.01" value="0.33" required placeholder="Roth (e.g. 0.33)" />
+  <input type="number" id="splitTax" min="0" max="1" step="0.01" value="0.34" required placeholder="Taxable (e.g. 0.34)" />
+
+  <label for="incomeShockProb">Career Income Shock Probability (0 to 1):</label>
+  <input type="number" id="incomeShockProb" min="0" max="1" step="0.01" value="0.05" required />
+
+  <label for="incomeShockImpact">Income Shock Impact (fraction lost):</label>
+  <input type="number" id="incomeShockImpact" min="0" max="1" step="0.01" value="0.3" required />
+
+  <label for="trials">Number of Monte Carlo Trials:</label>
+  <input type="number" id="trials" min="1" max="10000" value="1000" required />
+
+  <button id="runBtn" type="submit" aria-live="polite" aria-busy="false">▶ Run Simulation</button>
+  <span id="runStatus" style="display:none;" role="status" aria-live="polite">Running...</span>
+  <div id="progressBar" style="display:none;" aria-hidden="true"><div></div></div>
+  <div id="errorMsg" class="error" role="alert" aria-live="assertive" style="display:none;"></div>
+</form>
+
+<div id="resultArea" aria-live="polite" aria-atomic="true"></div>
+
+<section id="leaderboard" aria-label="Leaderboard of simulation runs">
+  <h2>Leaderboard - Top 5 Median Portfolio Values</h2>
+  <ul id="leaderboardList"></ul>
+</section>
+
+<script>
+// --- Worker script as a string ---
+const workerScript = `
+self.addEventListener('message', e => {
+  const data = e.data;
+  if (data.cmd === 'start') {
+    const {
+      years, saveRate, splitPre, splitRoth, splitTax,
+      incomeShockProb, incomeShockImpact, trials
+    } = data.params;
+
+    function normalRandom() {
+      let u = 0, v = 0;
+      while(u === 0) u = Math.random();
+      while(v === 0) v = Math.random();
+      return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+    }
+
+    function generateIncomeShockDuration() {
+      return 1 + Math.floor(Math.random() * 3);
+    }
+
+    const results = [];
+    for (let t=0; t < trials; t++) {
+      let balancePre = 0;
+      let balanceRoth = 0;
+      let balanceTax = 0;
+      let income = 1;
+      let shockYearsLeft = 0;
+
+      for (let year=0; year < years; year++) {
+        if (shockYearsLeft > 0) {
+          shockYearsLeft--;
+          income = 1 * (1 - incomeShockImpact);
+        } else if (Math.random() < incomeShockProb) {
+          shockYearsLeft = generateIncomeShockDuration() - 1;
+          income = 1 * (1 - incomeShockImpact);
+        } else {
+          income = 1;
+        }
+
+        const marketReturn = 0.07 + 0.15 * normalRandom();
+
+        const savings = income * saveRate;
+
+        const contribPre = savings * splitPre;
+        const contribRoth = savings * splitRoth;
+        const contribTax = savings * splitTax;
+
+        balancePre = balancePre * (1 + marketReturn) + contribPre;
+        balanceRoth = balanceRoth * (1 + marketReturn) + contribRoth;
+        balanceTax = balanceTax * (1 + marketReturn) + contribTax;
+
+        if (balancePre < 0) balancePre = 0;
+        if (balanceRoth < 0) balanceRoth = 0;
+        if (balanceTax < 0) balanceTax = 0;
+      }
+
+      const total = balancePre + balanceRoth + balanceTax;
+      results.push({
+        total,
+        pre: balancePre,
+        roth: balanceRoth,
+        tax: balanceTax
+      });
+
+      if (t % Math.max(1, Math.floor(trials/20)) === 0) {
+        self.postMessage({type:'progress', percent: (t/trials)*100, message: \`Trial \${t} / \${trials}\`});
+      }
+    }
+
+    results.sort((a,b) => a.total - b.total);
+
+    const p10 = results[Math.floor(trials*0.10)].total;
+    const p50 = results[Math.floor(trials*0.50)].total;
+    const p90 = results[Math.floor(trials*0.90)].total;
+    const mean = results.reduce((a,b) => a + b.total, 0) / trials;
+
+    const midIdx = Math.floor(trials*0.50);
+    const medianSplits = results[midIdx];
+
+    self.postMessage({
+      type: 'result',
+      stats: { p10, p50, p90, mean, trials, years, medianSplits }
+    });
+  }
+});
+`;
+
+const blob = new Blob([workerScript], {type: 'application/javascript'});
+const workerUrl = URL.createObjectURL(blob);
+const worker = new Worker(workerUrl);
+
+const runBtn = document.getElementById('runBtn');
+const runStatus = document.getElementById('runStatus');
+const progressBar = document.getElementById('progressBar');
+const progressFill = progressBar.querySelector('div');
+const errorMsg = document.getElementById('errorMsg');
+const resultArea = document.getElementById('resultArea');
+const leaderboardList = document.getElementById('leaderboardList');
+
+let leaderboardData = [];
+
+function formatCurrency(num) {
+  return num.toLocaleString('en-US', {style: 'currency', currency: 'USD', maximumFractionDigits:0});
+}
+
+function validateInputs() {
+  const years = Number(document.getElementById('years').value);
+  const saveRate = Number(document.getElementById('saveRate').value);
+  const splitPre = Number(document.getElementById('splitPre').value);
+  const splitRoth = Number(document.getElementById('splitRoth').value);
+  const splitTax = Number(document.getElementById('splitTax').value);
+  const incomeShockProb = Number(document.getElementById('incomeShockProb').value);
+  const incomeShockImpact = Number(document.getElementById('incomeShockImpact').value);
+  const trials = Number(document.getElementById('trials').value);
+
+  if (!Number.isInteger(years) || years < 1 || years > 100) throw new Error('Years must be an integer between 1 and 100.');
+  if (saveRate < 0 || saveRate > 1) throw new Error('Savings Rate must be between 0 and 1.');
+  if ([splitPre, splitRoth, splitTax].some(s => s < 0 || s > 1)) throw new Error('Contribution splits must be between 0 and 1.');
+  const sumSplits = splitPre + splitRoth + splitTax;
+  if (Math.abs(sumSplits - 1) > 0.01) throw new Error('Contribution splits must sum to approximately 1.');
+  if (incomeShockProb < 0 || incomeShockProb > 1) throw new Error('Income Shock Probability must be between 0 and 1.');
+  if (incomeShockImpact < 0 || incomeShockImpact > 1) throw new Error('Income Shock Impact must be between 0 and 1.');
+  if (!Number.isInteger(trials) || trials < 1 || trials > 10000) throw new Error('Trials must be an integer between 1 and 10000.');
+
+  return { years, saveRate, splitPre, splitRoth, splitTax, incomeShockProb, incomeShockImpact, trials };
+}
+
+function animateCountUp(element, target) {
+  let start = 0;
+  const duration = 1000;
+  const stepTime = 16;
+  const steps = duration / stepTime;
+  const increment = (target - start) / steps;
+  let current = start;
+  const formatter = new Intl.NumberFormat('en-US', {style:'currency', currency:'USD', maximumFractionDigits:0});
+  const interval = setInterval(() => {
+    current += increment;
+    if ((increment > 0 && current >= target) || (increment < 0 && current <= target)) {
+      current = target;
+      clearInterval(interval);
+    }
+    element.textContent = formatter.format(current);
+  }, stepTime);
+}
+
+function updateUIWithResults(stats) {
+  const {p10, p50, p90, mean, trials, years, medianSplits} = stats;
+  resultArea.textContent = '';
+  const p10Span = document.createElement('span');
+  const p50Span = document.createElement('span');
+  const p90Span = document.createElement('span');
+  const meanSpan = document.createElement('span');
+  const preSpan = document.createElement('span');
+  const rothSpan = document.createElement('span');
+  const taxSpan = document.createElement('span');
+
+  const lines = [
+    `Simulation Results (${trials.toLocaleString()} trials, ${years} years):\n`,
+    `10th percentile portfolio value: `,
+    `Median portfolio value: `,
+    `90th percentile portfolio value: `,
+    `Mean portfolio value: `,
+    ``,
+    `Median portfolio split:`,
+    `  Pre-tax: `,
+    `  Roth: `,
+    `  Taxable: `
+  ];
+
+  resultArea.appendChild(document.createTextNode(lines[0]));
+  resultArea.appendChild(document.createTextNode(lines[1]));
+  resultArea.appendChild(p10Span);
+  resultArea.appendChild(document.createTextNode('\n'));
+
+  resultArea.appendChild(document.createTextNode(lines[2]));
+  resultArea.appendChild(p50Span);
+  resultArea.appendChild(document.createTextNode('\n'));
+
+  resultArea.appendChild(document.createTextNode(lines[3]));
+  resultArea.appendChild(p90Span);
+  resultArea.appendChild(document.createTextNode('\n'));
+
+  resultArea.appendChild(document.createTextNode(lines[4]));
+  resultArea.appendChild(meanSpan);
+  resultArea.appendChild(document.createTextNode('\n\n'));
+
+  resultArea.appendChild(document.createTextNode(lines[6]));
+  resultArea.appendChild(document.createTextNode('\n'));
+  resultArea.appendChild(document.createTextNode(lines[7]));
+  resultArea.appendChild(preSpan);
+  resultArea.appendChild(document.createTextNode('\n'));
+  resultArea.appendChild(document.createTextNode(lines[8]));
+  resultArea.appendChild(rothSpan);
+  resultArea.appendChild(document.createTextNode('\n'));
+  resultArea.appendChild(document.createTextNode(lines[9]));
+  resultArea.appendChild(taxSpan);
+
+  animateCountUp(p10Span, p10);
+  animateCountUp(p50Span, p50);
+  animateCountUp(p90Span, p90);
+  animateCountUp(meanSpan, mean);
+
+  // Animate splits as percent
+  function animatePercent(element, target) {
+    let start = 0;
+    const duration = 800;
+    const stepTime = 16;
+    const steps = duration / stepTime;
+    const increment = (target*100 - start) / steps;
+    let current = start;
+    const interval = setInterval(() => {
+      current += increment;
+      if (current >= target*100) {
+        current = target*100;
+        clearInterval(interval);
+      }
+      element.textContent = current.toFixed(1) + '%';
+    }, stepTime);
+  }
+
+  animatePercent(preSpan, medianSplits.pre);
+  animatePercent(rothSpan, medianSplits.roth);
+  animatePercent(taxSpan, medianSplits.tax);
+
+  // Update leaderboard
+  updateLeaderboard(stats);
+}
+
+function updateLeaderboard(stats) {
+  leaderboardData.push(stats);
+  // Sort descending by median portfolio value (p50)
+  leaderboardData.sort((a,b) => b.p50 - a.p50);
+  // Keep top 5
+  leaderboardData = leaderboardData.slice(0,5);
+
+  leaderboardList.innerHTML = '';
+  leaderboardData.forEach((entry, idx) => {
+    const li = document.createElement('li');
+    li.style.animationDelay = `${idx * 0.12}s`;
+    li.textContent = `Median: ${formatCurrency(entry.p50)} | Years: ${entry.years} | Trials: ${entry.trials}`;
+    leaderboardList.appendChild(li);
+  });
+}
+
+function startSimulation() {
+  errorMsg.style.display = 'none';
+  resultArea.textContent = '';
+  runBtn.disabled = true;
+  runStatus.style.display = 'inline';
+  runBtn.setAttribute('aria-busy', 'true');
+  progressBar.style.display = 'inline-block';
+  progressFill.style.width = '0%';
+
+  try {
+    const params = validateInputs();
+
+    worker.postMessage({cmd: 'start', params});
+  } catch (e) {
+    runBtn.disabled = false;
+    runStatus.style.display = 'none';
+    runBtn.setAttribute('aria-busy', 'false');
+    progressBar.style.display = 'none';
+    errorMsg.textContent = e.message;
+    errorMsg.style.display = 'block';
+  }
+}
+
+worker.addEventListener('message', e => {
+  const msg = e.data;
+  if (msg.type === 'progress') {
+    progressFill.style.width = msg.percent + '%';
+    runStatus.textContent = `Running... ${Math.floor(msg.percent)}%`;
+  } else if (msg.type === 'result') {
+    runBtn.disabled = false;
+    runStatus.style.display = 'none';
+    runBtn.setAttribute('aria-busy', 'false');
+    progressBar.style.display = 'none';
+
+    updateUIWithResults(msg.stats);
+  }
+});
+
+document.getElementById('simForm').addEventListener('submit', e => {
+  e.preventDefault();
+  startSimulation();
+});
+</script>
+
+</body>
+</html>
