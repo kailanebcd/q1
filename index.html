@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>🚀 FIRE Risk & Speed Simulator</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Bootstrap -->
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+body {
+  background-color: #121212;
+  color: #e0e0e0;
+  font-family: 'Segoe UI', sans-serif;
+}
+h1, h2 {
+  text-align: center;
+  margin-top: 1rem;
+}
+.card {
+  background-color: #1e1e1e;
+  border: none;
+  border-radius: 8px;
+}
+input, button {
+  margin-bottom: 0.8rem;
+}
+canvas {
+  background: #181818;
+  border-radius: 8px;
+  padding: 8px;
+}
+</style>
+</head>
+<body>
+
+<div class="container-fluid">
+  <h1>🚀 Dynamic FIRE Risk & Speed Simulator</h1>
+  <div class="row mt-4">
+    <!-- Sidebar -->
+    <div class="col-md-3">
+      <div class="card p-3">
+        <h5>Simulation Parameters</h5>
+        <input type="number" id="years" class="form-control" value="40" placeholder="Years">
+        <input type="number" id="trials" class="form-control" value="200" placeholder="Trials">
+        <input type="number" id="startPortfolio" class="form-control" value="50000" placeholder="Start Portfolio">
+        <input type="number" id="startSalary" class="form-control" value="60000" placeholder="Start Salary">
+        <input type="number" id="targetPortfolio" class="form-control" value="1000000" placeholder="Target Portfolio">
+        <input type="number" step="0.01" id="mu" class="form-control" value="0.06" placeholder="Annual Return">
+        <input type="number" step="0.01" id="sigma" class="form-control" value="0.16" placeholder="Volatility">
+        <input type="number" step="0.01" id="saveRate" class="form-control" value="0.2" placeholder="Save Rate">
+        <input type="number" step="0.01" id="spendRate" class="form-control" value="0.04" placeholder="Spend Rate">
+        <button id="runBtn" class="btn btn-success w-100">▶ Run Simulation</button>
+      </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="col-md-9">
+      <div class="row">
+        <div class="col-md-4">
+          <div class="card p-3 text-center">
+            <h6>Fastest FIRE</h6>
+            <h3 id="fastest">--</h3>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="card p-3 text-center">
+            <h6>Median FIRE</h6>
+            <h3 id="median">--</h3>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="card p-3 text-center">
+            <h6>Success Rate</h6>
+            <h3 id="success">--</h3>
+          </div>
+        </div>
+      </div>
+      <div class="row mt-4">
+        <div class="col-md-6">
+          <canvas id="fireDist"></canvas>
+        </div>
+        <div class="col-md-6">
+          <canvas id="finalNW"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function simulateTrial(p) {
+  const steps = 12;
+  const dt = 1 / steps;
+  let nw = p.startPortfolio;
+  let salary = p.startSalary;
+  let timeToFire = null;
+  let retired = false;
+  
+  for (let t = 0; t < p.years * steps; t++) {
+    // Market
+    const z = (Math.random() * 2 - 1) * Math.sqrt(dt) * p.sigma;
+    nw *= Math.exp((p.mu - 0.5 * p.sigma ** 2) * dt + z);
+    // Work / Retire
+    if (!retired) {
+      nw += salary * p.saveRate * dt;
+      if (Math.random() < 0.25 * dt) salary *= (1 + 0.03);
+      if (Math.random() < 0.05 * dt) salary = 0;
+      if (salary === 0 && Math.random() < 0.1) salary = p.startSalary;
+      if (nw >= p.targetPortfolio) {
+        retired = true;
+        timeToFire = t * dt;
+      }
+    } else {
+      nw -= nw * p.spendRate * dt;
+    }
+  }
+  return { timeToFire, finalNW: nw };
+}
+
+function runSim(params) {
+  const fireTimes = [];
+  const finals = [];
+  for (let i = 0; i < params.trials; i++) {
+    const r = simulateTrial(params);
+    if (r.timeToFire !== null) fireTimes.push(r.timeToFire);
+    finals.push(r.finalNW);
+  }
+  return { fireTimes, finals };
+}
+
+function renderChart(id, data, label, color) {
+  const ctx = document.getElementById(id).getContext("2d");
+  return new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: data.labels,
+      datasets: [{
+        label: label,
+        data: data.values,
+        backgroundColor: color
+      }]
+    },
+    options: {
+      responsive: true,
+      animation: { duration: 1200 }
+    }
+  });
+}
+
+document.getElementById("runBtn").addEventListener("click", () => {
+  const p = {
+    years: +document.getElementById("years").value,
+    trials: +document.getElementById("trials").value,
+    startPortfolio: +document.getElementById("startPortfolio").value,
+    startSalary: +document.getElementById("startSalary").value,
+    targetPortfolio: +document.getElementById("targetPortfolio").value,
+    mu: +document.getElementById("mu").value,
+    sigma: +document.getElementById("sigma").value,
+    saveRate: +document.getElementById("saveRate").value,
+    spendRate: +document.getElementById("spendRate").value
+  };
+  
+  const { fireTimes, finals } = runSim(p);
+  const fastest = fireTimes.length ? Math.min(...fireTimes).toFixed(2) : "--";
+  const median = fireTimes.length ? fireTimes.sort((a,b)=>a-b)[Math.floor(fireTimes.length/2)].toFixed(2) : "--";
+  const success = ((fireTimes.length / p.trials) * 100).toFixed(1) + "%";
+  
+  document.getElementById("fastest").textContent = fastest;
+  document.getElementById("median").textContent = median;
+  document.getElementById("success").textContent = success;
+  
+  const fireHist = histogram(fireTimes, 15);
+  const finalHist = histogram(finals, 15);
+  
+  renderChart("fireDist", fireHist, "Years to FIRE", "#4caf50");
+  renderChart("finalNW", finalHist, "Final Net Worth ($)", "#2196f3");
+});
+
+function histogram(data, bins) {
+  if (!data.length) return { labels: [], values: [] };
+  const min = Math.min(...data);
+  const max = Math.max(...data);
+  const step = (max - min) / bins;
+  const counts = new Array(bins).fill(0);
+  data.forEach(v => {
+    let idx = Math.floor((v - min) / step);
+    if (idx >= bins) idx = bins - 1;
+    counts[idx]++;
+  });
+  const labels = counts.map((_, i) => (min + i * step).toFixed(1));
+  return { labels, values: counts };
+}
+</script>
+</body>
+</html>
