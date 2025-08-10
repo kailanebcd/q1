@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en" >
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dynamic FIRE Risk & Speed Simulator - Extended</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      max-width: 800px;
+    }
+    label {
+      display: block;
+      margin-top: 12px;
+      font-weight: bold;
+    }
+    input[type="number"], input[type="text"] {
+      width: 100%;
+      padding: 6px 8px;
+      font-size: 1rem;
+      box-sizing: border-box;
+      margin-top: 4px;
+    }
+    button {
+      margin-top: 16px;
+      padding: 10px 18px;
+      font-size: 1.1rem;
+      cursor: pointer;
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    #runStatus {
+      margin-left: 10px;
+      font-size: 1rem;
+      color: #007700;
+      vertical-align: middle;
+    }
+    #progressBar {
+      display: inline-block;
+      vertical-align: middle;
+      width: 120px;
+      height: 14px;
+      background: #ddd;
+      border-radius: 8px;
+      overflow: hidden;
+      margin-left: 10px;
+      position: relative;
+    }
+    #progressBar > div {
+      background: #4caf50;
+      height: 100%;
+      width: 0;
+      transition: width 0.2s ease;
+    }
+    #resultArea {
+      margin-top: 24px;
+      background: #f4f4f4;
+      padding: 16px;
+      border-radius: 6px;
+      white-space: pre-wrap;
+      font-family: monospace;
+      min-height: 120px;
+      position: relative;
+    }
+    #leaderboard {
+      margin-top: 32px;
+      border-top: 2px solid #333;
+      padding-top: 16px;
+    }
+    #leaderboard h2 {
+      margin-bottom: 8px;
+    }
+    #leaderboardList {
+      list-style: none;
+      padding-left: 0;
+      max-height: 220px;
+      overflow-y: auto;
+    }
+    #leaderboardList li {
+      background: #e0f7e0;
+      margin-bottom: 6px;
+      padding: 10px;
+      border-radius: 4px;
+      opacity: 0;
+      transform: translateX(-20px);
+      animation: slideFadeIn 0.3s forwards;
+    }
+    @keyframes slideFadeIn {
+      to {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+    .countup {
+      font-weight: bold;
+      color: #2c7;
+    }
+  </style>
+</head>
+<body>
+
+<h1>Dynamic FIRE Risk & Speed Simulator - Extended</h1>
+
+<form id="simForm">
+  <label for="years">Simulation Horizon (years):</label>
+  <input type="number" id="years" min="1" max="100" value="40" required />
+
+  <label for="saveRate">Savings Rate (0 to 1):</label>
+  <input type="number" id="saveRate" min="0" max="1" step="0.01" value="0.5" required />
+
+  <label>Contribution Splits (must sum to ~1):</label>
+  <input type="number" id="splitPre" min="0" max="1" step="0.01" value="0.33" required placeholder="Pre-tax (e.g. 0.33)" />
+  <input type="number" id="splitRoth" min="0" max="1" step="0.01" value="0.33" required placeholder="Roth (e.g. 0.33)" />
+  <input type="number" id="splitTax" min="0" max="1" step="0.01" value="0.34" required placeholder="Taxable (e.g. 0.34)" />
+
+  <label for="incomeShockProb">Career Income Shock Probability (0 to 1):</label>
+  <input type="number" id="incomeShockProb" min="0" max="1" step="0.01" value="0.05" required />
+
+  <label for="incomeShockImpact">Income Shock Impact (fraction lost):</label>
+  <input type="number" id="incomeShockImpact" min="0" max="1" step="0.01" value="0.3" required />
+
+  <label for="trials">Number of Monte Carlo Trials:</label>
+  <input type="number" id="trials" min="1" max="10000" value="1000" required />
+
+  <button id="runBtn" type="submit">▶ Run Simulation</button>
+  <span id="runStatus" style="display:none;">Running...</span>
+  <div id="progressBar" style="display:none;"><div></div></div>
+</form>
+
+<div id="resultArea" aria-live="polite"></div>
+
+<section id="leaderboard" aria-label="Leaderboard of simulation runs">
+  <h2>Leaderboard - Top 5 Median Portfolio Values</h2>
+  <ul id="leaderboardList"></ul>
+</section>
+
+<script>
+// --- Worker script as a string ---
+const workerScript = `
+self.addEventListener('message', e => {
+  const data = e.data;
+  if (data.cmd === 'start') {
+    const {
+      years, saveRate, splitPre, splitRoth, splitTax,
+      incomeShockProb, incomeShockImpact, trials
+    } = data.params;
+
+    function normalRandom() {
+      let u = 0, v = 0;
+      while(u === 0) u = Math.random();
+      while(v === 0) v = Math.random();
+      return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+    }
+
+    // Career shock model: temporary shock lasting 1-3 years
+    function generateIncomeShockDuration() {
+      return 1 + Math.floor(Math.random() * 3);
+    }
+
+    const results = [];
+    for (let t=0; t < trials; t++) {
+      let balancePre = 0;
+      let balanceRoth = 0;
+      let balanceTax = 0;
+      let income = 1; // base income normalized
+      let shockYearsLeft = 0;
+
+      for (let year=0; year < years; year++) {
+        // Apply or start income shock
+        if (shockYearsLeft > 0) {
+          shockYearsLeft--;
+          income = 1 * (1 - incomeShockImpact);
+        } else if (Math.random() < incomeShockProb) {
+          shockYearsLeft = generateIncomeShockDuration() - 1; // counting down after this year
+          income = 1 * (1 - incomeShockImpact);
+        } else {
+          income = 1;
+        }
+
+        // Market returns (same distribution)
+        const marketReturn = 0.07 + 0.15 * normalRandom();
+
+        // Savings for the year
+        const savings = income * saveRate;
+
+        // Contributions split
+        const contribPre = savings * splitPre;
+        const contribRoth = savings * splitRoth;
+        const contribTax = savings * splitTax;
+
+        // Update balances with growth plus contributions
+        balancePre = balancePre * (1 + marketReturn) + contribPre;
+        balanceRoth = balanceRoth * (1 + marketReturn) + contribRoth;
+        balanceTax = balanceTax * (1 + marketReturn) + contribTax;
+
+        // Prevent negatives (just in case)
+        if (balancePre < 0) balancePre = 0;
+        if (balanceRoth < 0) balanceRoth = 0;
+        if (balanceTax < 0) balanceTax = 0;
+      }
+
+      // Total portfolio at end
+      const total = balancePre + balanceRoth + balanceTax;
+      results.push({
+        total,
+        pre: balancePre,
+        roth: balanceRoth,
+        tax: balanceTax
+      });
+
+      if (t % Math.max(1, Math.floor(trials/20)) === 0) {
+        self.postMessage({type:'progress', percent: (t/trials)*100, message: \`Trial \${t} / \${trials}\`});
+      }
+    }
+
+    // Sort by total portfolio value
+    results.sort((a,b) => a.total - b.total);
+
+    // Compute stats for total
+    const p10 = results[Math.floor(trials*0.10)].total;
+    const p50 = results[Math.floor(trials*0.50)].total;
+    const p90 = results[Math.floor(trials*0.90)].total;
+    const mean = results.reduce((a,b) => a + b.total, 0) / trials;
+
+    // Median index for split balances
+    const midIdx = Math.floor(trials*0.50);
+    const medianSplits = results[midIdx];
+
+    self.postMessage({
+      type: 'result',
+      stats: { p10, p50, p90, mean, trials, years, medianSplits }
+    });
+  }
+});
+`;
+
+// Create worker
+const blob = new Blob([workerScript], {type: 'application/javascript'});
+const workerUrl = URL.createObjectURL(blob);
+const worker = new Worker(workerUrl);
+
+const runBtn = document.getElementById('runBtn');
+const runStatus = document.getElementById('runStatus');
+const progressBar = document.getElementById('progressBar');
+const progressFill = progressBar.querySelector('div');
+const resultArea = document.getElementById('resultArea');
+const leaderboardList = document.getElementById('leaderboardList');
+
+let leaderboardData = [];
+
+function validateInputs() {
+  const years = +document.getElementById('years').value;
+  if (isNaN(years) || years < 1) throw new Error("Simulation Horizon (years) must be at least 1.");
+
+  const saveRate = +document.getElementById('saveRate').value;
+  if (isNaN(saveRate) || saveRate < 0 || saveRate > 1) throw new Error("Savings Rate must be between 0 and 1.");
+
+  const splitPre = +document.getElementById('splitPre').value;
+  const splitRoth = +document.getElementById('splitRoth').value;
+  const splitTax = +document.getElementById('splitTax').value;
+  const sumSplits = splitPre + splitRoth + splitTax;
+  if (Math.abs(sumSplits - 1) > 0.05) throw new Error("Contribution splits must sum to approximately 1.");
+
+  const incomeShockProb = +document.getElementById('incomeShockProb').value;
+  if (isNaN(incomeShockProb) || incomeShockProb < 0 || incomeShockProb > 1)
+    throw new Error("Income Shock Probability must be between 0 and 1.");
+
+  const incomeShockImpact = +document.getElementById('incomeShockImpact').value;
+  if (isNaN(incomeShockImpact) || incomeShockImpact < 0 || incomeShockImpact > 1)
+    throw new Error("Income Shock Impact must be between 0 and 1.");
+
+  const trials = +document.getElementById('trials').value;
+  if (isNaN(trials) || trials < 1 || trials > 10000)
+    throw new Error("Number of Trials must be between 1 and 10,000.");
+
+  return { years, saveRate, splitPre, splitRoth, splitTax, incomeShockProb, incomeShockImpact, trials };
+}
+
+function formatCurrency(num) {
+  return '$' + num.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+function animateCountUp(element, targetValue, duration=1500) {
+  const startValue = 0;
+  const startTime = performance.now();
+
+  function step(currentTime) {
+    const elapsed = currentTime - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    const value = startValue + (targetValue - startValue) * progress;
+    element.textContent = formatCurrency(value);
+    if (progress < 1) {
+      requestAnimationFrame(step);
+    }
+  }
+  requestAnimationFrame(step);
+}
+
+function updateUIWithResults(stats, inputs) {
+  const { p10, p50, p90, mean, trials, years, medianSplits } = stats;
+
+  // Clear old content
+  resultArea.textContent = '';
+
+  // Create lines with countup spans
+  const lines = [
+    `Simulated ${trials} trials over ${years} years.\n`,
+    `Estimated Portfolio Balance (end of horizon):\n`,
+    `  10th Percentile (worst case): `,
+    `  Median (50th percentile):        `,
+    `  90th Percentile (best case):    `,
+    `  Mean (average):                 \n`,
+    `Portfolio splits (median trial):\n`,
+    `  Pre-tax:   `,
+    `  Roth:      `,
+    `  Taxable:   \n`,
+    `Note: Model uses simplified assumptions with random market returns and temporary income shocks.`
+  ];
+
+  // Create spans for countups
+  const p10Span = document.createElement('span');
+  p10Span.classList.add('countup');
+  const p50Span = document.createElement('span');
+  p50Span.classList.add('countup');
+  const p90Span = document.createElement('span');
+  p90Span.classList.add('countup');
+  const meanSpan = document.createElement('span');
+  meanSpan.classList.add('countup');
+  const preSpan = document.createElement('span');
+  preSpan.classList.add('countup');
+  const rothSpan = document.createElement('span');
+  rothSpan.classList.add('countup');
+  const taxSpan = document.createElement('span');
+  taxSpan.classList.add('countup');
+
+  // Append lines and spans
+  resultArea.appendChild(document.createTextNode(lines[0]));
+  resultArea.appendChild(document.createTextNode(lines[1]));
+
+  resultArea.appendChild(document.createTextNode(lines[2]));
+  resultArea.appendChild(p10Span);
+  resultArea.appendChild(document.createTextNode('\n'));
+
+  resultArea.appendChild(document.createTextNode(lines[3]));
+  resultArea.appendChild(p50Span);
+  resultArea.appendChild(document.createTextNode('\n'));
+
+  resultArea.appendChild(document.createTextNode(lines[4]));
+  resultArea.appendChild(p90Span);
+  resultArea.appendChild(document.createTextNode('\n'));
+
+  resultArea.appendChild(document.createTextNode(lines[5]));
+  resultArea.appendChild(meanSpan);
+  resultArea.appendChild(document.createTextNode('\
